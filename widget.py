@@ -47,12 +47,15 @@ def countdown(reset):
 class FuelWidget(QWidget):
     def __init__(self):
         super().__init__()
-        for filename in ('segoeui.ttf','seguisb.ttf'):
-            QFontDatabase.addApplicationFont(str(Path(os.environ.get('WINDIR','C:/Windows'))/'Fonts'/filename))
+        if sys.platform == 'win32':
+            for filename in ('segoeui.ttf','seguisb.ttf'):
+                QFontDatabase.addApplicationFont(str(Path(os.environ.get('WINDIR','C:/Windows'))/'Fonts'/filename))
         self.setWindowTitle('Fuel | AI usage')
         self.setWindowFlags(Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint|Qt.Tool|Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        if sys.platform == 'darwin':
+            self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)
         self.setMouseTracking(True)
         self.data={}; self.errors={}; self.updated={}; self.workers={}; self.display={'Codex':0,'Claude':0}
         self.providers={'Codex':{'kind':'meter'},'Claude':{'kind':'meter'}}
@@ -187,7 +190,7 @@ class FuelWidget(QWidget):
 
     def text(self,p,x,y,text,size=10,color=TEXT,bold=False):
         key=(size,bold)
-        if key not in self.fonts:self.fonts[key]=QFont('Segoe UI',size,QFont.DemiBold if bold else QFont.Normal)
+        if key not in self.fonts:self.fonts[key]=QFont('Segoe UI' if sys.platform=='win32' else 'Helvetica Neue',size,QFont.DemiBold if bold else QFont.Normal)
         p.setFont(self.fonts[key])
         text=p.fontMetrics().elidedText(str(text),Qt.ElideRight,max(1,round(308-x)))
         p.setPen(QColor(color));p.drawText(QPointF(x,y),text)
@@ -333,15 +336,26 @@ def main():
     if '--resume' in sys.argv:
         (STATE/'paused').unlink(missing_ok=True)
     if (STATE/'paused').exists():return
-    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
-    kernel.CreateMutexW.restype=ctypes.c_void_p
-    mutex=kernel.CreateMutexW(None,False,'Local\\FuelWidgetV1')
-    if not mutex or ctypes.get_last_error()==183:return
+    kernel=None; mutex=None; lock=None
+    if sys.platform=='win32':
+        kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+        kernel.CreateMutexW.restype=ctypes.c_void_p
+        mutex=kernel.CreateMutexW(None,False,'Local\\FuelWidgetV1')
+        if not mutex or ctypes.get_last_error()==183:return
+    elif sys.platform=='darwin':
+        import fcntl
+        lock=(STATE/'widget.lock').open('a+')
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return
+    else:
+        raise RuntimeError('Fuel supports Windows and macOS only')
     app=QApplication(sys.argv);app.setQuitOnLastWindowClosed(False)
     widget=FuelWidget()
     logger.info('Started pid=%s',os.getpid())
     try: sys.exit(app.exec())
     finally:
-        kernel.CloseHandle.argtypes=[ctypes.c_void_p];kernel.CloseHandle(mutex)
+        if kernel:
+            kernel.CloseHandle.argtypes=[ctypes.c_void_p];kernel.CloseHandle(mutex)
+        if lock:lock.close()
 
 if __name__=='__main__':main()

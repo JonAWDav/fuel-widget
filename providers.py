@@ -1,4 +1,4 @@
-"""Read-only provider adapters and bounded Windows app discovery.
+"""Read-only provider adapters and bounded desktop app discovery.
 
 Only allowlisted credential names are read. Nothing is copied into app state.
 """
@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 import shutil
 import socket
+import sys
 import requests
 import yaml
 from feeds import codex, claude, window
@@ -115,6 +116,12 @@ def port_open(port):
 
 def installed_names():
     names=[]
+    if sys.platform == 'darwin':
+        for folder in (Path('/Applications'), Path.home()/'Applications'):
+            try:
+                names.extend(p.stem.lower() for p in folder.iterdir() if p.suffix.lower()=='.app')
+            except OSError: pass
+        return names
     try:
         import winreg
         for hive in (winreg.HKEY_CURRENT_USER,winreg.HKEY_LOCAL_MACHINE):
@@ -150,7 +157,7 @@ def discover():
         'Perplexity':([],None), 'DeepSeek':([],None)}
     for name,(paths,command) in catalog.items():
         if any(p.exists() for p in paths) or (command and shutil.which(command)) or any(n==name.lower() or n.startswith(name.lower()+' ') for n in installed):
-            result[name]={'kind':'detected','detail':'Usage is not exposed to Fuel','subtitle':'Detected on this PC'}
+            result[name]={'kind':'detected','detail':'Usage is not exposed to Fuel','subtitle':'Detected on this computer'}
     for name,key in [('Gemini','GEMINI_API_KEY'),('OpenAI API','OPENAI_API_KEY'),('Anthropic API','ANTHROPIC_API_KEY'),
                      ('DeepSeek','DEEPSEEK_API_KEY'),('Grok','XAI_API_KEY'),('Groq','GROQ_API_KEY'),('Mistral','MISTRAL_API_KEY')]:
         if secret(key): result[name]={'kind':'detected','detail':'Usage needs a provider adapter','subtitle':'API credential detected'}

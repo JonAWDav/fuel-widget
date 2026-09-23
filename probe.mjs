@@ -1,7 +1,18 @@
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
+import {existsSync} from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-const exe=process.env.CODEX_BINARY || path.join(process.env.APPDATA,'npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe');
+const windowsExe=process.env.APPDATA ? path.join(process.env.APPDATA,'npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe') : '';
+const macCandidates=[
+ path.join(os.homedir(),'.npm-global/bin/codex'),
+ path.join(os.homedir(),'.local/bin/codex'),
+ path.join(os.homedir(),'.bun/bin/codex'),
+ '/opt/homebrew/bin/codex',
+ '/usr/local/bin/codex'
+];
+const exe=process.env.CODEX_BINARY || (process.platform==='win32' && windowsExe && existsSync(windowsExe) ? windowsExe : '') ||
+ (process.platform==='darwin' ? macCandidates.find(existsSync) : '') || 'codex';
 const child=spawn(exe,['app-server','--stdio'],{windowsHide:true,stdio:['pipe','pipe','ignore']});
 const pending=new Map(); let seq=0;
 const deadline=setTimeout(()=>{child.kill(); process.exit(1)},25000);
