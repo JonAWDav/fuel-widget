@@ -137,6 +137,7 @@ class FuelWidget(QWidget):
             if data:
                 self.providers=data
                 for n in data:self.display.setdefault(n,0)
+                self.update_connections()
                 self.set_progress(self.progress)
                 self.start_readers({n:READERS[n] for n,d in data.items() if d['kind']=='meter' and n in READERS and n not in self.updated})
             return
@@ -167,6 +168,8 @@ class FuelWidget(QWidget):
         self.menu=QMenu();self.menu.setStyleSheet('QMenu{background:#151D2B;color:#ECF1F7;border:1px solid #354154;padding:6px;}QMenu::item{padding:8px 18px;}QMenu::item:selected{background:#2B394C;}')
         self.menu.addAction('Refresh usage',self.refresh)
         self.menu.addAction('Move to top-right',self.reanchor)
+        self.connections=self.menu.addMenu('Other detected apps')
+        self.update_connections()
         motion_action=self.menu.addAction('Animate meters');motion_action.setCheckable(True);motion_action.setChecked(self.motion)
         motion_action.toggled.connect(self.set_motion)
         self.menu.addSeparator();self.menu.addAction('Quit (stays off until reopened)',self.quit_intentionally)
@@ -237,8 +240,16 @@ class FuelWidget(QWidget):
         self.motion=enabled;self.tick.setInterval(16 if self.expanded and enabled else 250)
         (STATE/'preferences.json').write_text(json.dumps({'motion':enabled}))
 
+    def update_connections(self):
+        if not hasattr(self,'connections'):return
+        self.connections.clear()
+        for name,descriptor in self.providers.items():
+            if descriptor['kind']=='detected':
+                action=self.connections.addAction(name+' : usage unavailable');action.setEnabled(False)
+        self.connections.setEnabled(bool(self.connections.actions()))
+
     def ordered_names(self):
-        return sorted(self.providers,key=lambda n:({'meter':0,'linked':1,'detected':2}.get(self.providers[n]['kind'],2),list(self.providers).index(n)))
+        return [name for name,descriptor in self.providers.items() if descriptor['kind']=='meter']
 
     def panel_height(self,name):
         data=self.data.get(name,{})
@@ -246,7 +257,7 @@ class FuelWidget(QWidget):
         if data.get('kind') in ('balance','local'):return 124
         return 96+32*max(1,len(data.get('windows',[])))
 
-    def content_height(self):return sum(self.panel_height(n)+10 for n in self.providers)
+    def content_height(self):return sum(self.panel_height(n)+10 for n in self.ordered_names())
 
     def set_scroll(self,value):
         self.scroll=max(0,min(float(value),max(0,self.content_height()-(self.height()-108))))
@@ -315,7 +326,7 @@ class FuelWidget(QWidget):
         age=int(time.time()-min(self.updated.values())) if self.updated else None
         self.text(p,22,footer+18,'Syncing...' if age is None else f'Updated {age//60}m ago' if age>=60 else 'Just updated',8,MUTED)
         more=self.content_height()>self.height()-108
-        self.text(p,185,footer+18,f'SCROLL / {len(self.providers)} APPS' if more else 'RIGHT-CLICK FOR OPTIONS',6,MUTED)
+        self.text(p,185,footer+18,f'SCROLL / {len(self.ordered_names())} METERS' if more else 'RIGHT-CLICK FOR OPTIONS',6,MUTED)
         p.end()
 
 def main():

@@ -30,6 +30,8 @@ app=QApplication([])
 w=widget.FuelWidget()
 w.demo=demo
 if 'providers' in snapshot:w.providers=snapshot['providers']
+assert all(w.providers[n]['kind']=='meter' for n in w.ordered_names())
+assert 'Hermes' not in w.ordered_names()
 for name,feed in snapshot['feeds'].items():
     if feed.get('data'):
         w.data[name]=feed['data'];w.updated[name]=feed['updated'];w.display[name]=widget.effective(feed['data']) or 0

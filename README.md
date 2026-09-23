@@ -35,12 +35,12 @@ Discovery runs in a background worker every 90 seconds. Finding an app does not 
 | Kimi / Moonshot API | Prepaid USD balance | Existing `KIMI_API_KEY` or `MOONSHOT_API_KEY` |
 | Kimi Code | Coding-plan windows, experimental adapter | `KIMI_CODE_API_KEY` or a `sk-kimi-` key |
 | OpenRouter | Key spending cap remaining, or uncapped status | `OPENROUTER_API_KEY` |
-| Hermes | Link to its configured provider's meter | `HERMES_HOME/config.yaml` or `~/.hermes/config.yaml` |
+| Hermes | Its underlying provider's usage, with no redundant agent card | `HERMES_HOME/config.yaml` or `~/.hermes/config.yaml` |
 | Ollama | Loaded models and VRAM, no quota percentage | Running local API on port 11434 |
 | LM Studio | Loaded models, no quota percentage | v1 local API on port 1234; optional `LM_API_TOKEN` |
-| Cursor, Gemini, Windsurf, Copilot and other recognised AI apps | Detected status, with usage explicitly unavailable | Known app folders, CLI presence and Windows installed-app names |
+| Cursor, Gemini, Windsurf, Copilot and other recognised AI apps | Listed under Other detected apps in the right-click menu when usage is unavailable | Known app folders, CLI presence and Windows installed-app names |
 
-Known-app discovery also recognises Jan, GPT4All, AnythingLLM, Msty, Chatbox and several API-key environments. Other installed desktop names containing AI, LLM, GPT or Copilot receive an unmetered status card. Browser-only apps, arbitrary portable executables and every future AI app cannot be discovered universally. Add adapters in `providers.py` to turn detected status into real usage. ChatGPT chat allowances are not inferred from the separate Codex meter.
+Known-app discovery also recognises Jan, GPT4All, AnythingLLM, Msty, Chatbox and several API-key environments. Other installed desktop names containing AI, LLM, GPT or Copilot are listed in the menu. The main panel shows only connected provider adapters, not agent names or placeholder app cards. Browser-only apps, arbitrary portable executables and every future AI app cannot be discovered universally. Add adapters in `providers.py` to turn detected status into real usage. ChatGPT chat allowances are not inferred from the separate Codex meter.
 
 Allowlisted provider keys are read from existing process/user environment variables or Hermes' existing `.env`, in memory only. Fuel does not copy keys into its files, inspect browser cookies, or read conversation content. Hermes is linked rather than counted as a second allowance. Changing a Windows user environment variable can be detected without restarting Fuel. Editing a process-only environment requires restarting it.
 
