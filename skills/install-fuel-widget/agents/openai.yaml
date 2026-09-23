@@ -1,0 +1,3 @@
+interface:
+  display_name: "Install Fuel Widget"
+  short_description: "Download and set up Fuel on Windows or macOS"

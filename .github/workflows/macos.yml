@@ -23,3 +23,5 @@ jobs:
         run: .venv/bin/python check_ui.py --demo
       - name: Prepare and validate launch agent
         run: bash install-macos.sh --prepare-only
+      - name: Test installer skill download
+        run: bash skills/install-fuel-widget/scripts/install-fuel.sh "$RUNNER_TEMP/fuel-installer-smoke" --download-only
