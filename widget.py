@@ -57,7 +57,7 @@ class FuelWidget(QWidget):
         if sys.platform == 'darwin':
             self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)
         self.setMouseTracking(True)
-        self.data={}; self.errors={}; self.updated={}; self.workers={}; self.display={'Codex':0,'Claude':0}
+        self.data={}; self.errors={}; self.updated={}; self.workers={}; self.retry_after={}; self.display={'Codex':0,'Claude':0}
         self.providers={'Codex':{'kind':'meter'},'Claude':{'kind':'meter'}}
         self.fonts={}; self.scroll=0.; self.last_frame=time.monotonic(); self.last_refresh=0.
         self.motion=True
@@ -125,7 +125,7 @@ class FuelWidget(QWidget):
 
     def start_readers(self,readers):
         for name,fn in readers.items():
-            if name in self.workers: continue
+            if name in self.workers or time.time()<self.retry_after.get(name,0): continue
             worker=Worker(name,fn); self.workers[name]=worker
             worker.result.connect(self.received)
             worker.finished.connect(lambda n=name:self.worker_done(n))
@@ -145,12 +145,14 @@ class FuelWidget(QWidget):
                 self.start_readers({n:READERS[n] for n,d in data.items() if d['kind']=='meter' and n in READERS and n not in self.updated})
             return
         if data:
-            self.data[name]=data; self.updated[name]=time.time(); self.errors.pop(name,None)
+            self.data[name]=data; self.updated[name]=time.time(); self.errors.pop(name,None); self.retry_after.pop(name,None)
             try: self.history.record(name,data.get('windows',[]),self.updated[name])
             except OSError: logger.warning('Could not persist forecast history')
             logger.info('%s connected',name)
         else:
             self.errors[name]=error; logger.warning('%s: %s',name,error)
+            if 'rate limited' in error.lower():
+                self.retry_after[name]=time.time()+300
         self.set_progress(self.progress);self.write_health(); self.update()
 
     def write_health(self):
@@ -158,6 +160,7 @@ class FuelWidget(QWidget):
                 'geometry':[self.x(),self.y(),self.width(),self.height()],
                 'providers':self.providers,
                 'feeds':{name:{'data':self.data.get(name),'updated':self.updated.get(name),'error':self.errors.get(name),
+                    'retry_after':self.retry_after.get(name),
                     'forecasts':[self.history.estimate(name,w,time.time(),bool(self.errors.get(name)) or time.time()-self.updated.get(name,0)>300) for w in self.data.get(name,{}).get('windows',[])]} for name in self.providers}}
         temp=STATE/'health.tmp'; temp.write_text(json.dumps(record,indent=2)); temp.replace(STATE/'health.json')
 
@@ -210,7 +213,7 @@ class FuelWidget(QWidget):
             for yy,dy in [(y,1),(y+height,-1)]:
                 p.drawLine(QPointF(x,yy+dy*9),QPointF(x,yy));p.drawLine(QPointF(x,yy),QPointF(x+dx*9,yy))
         self.text(p,33,y+24,name.upper(),9,TEXT,True)
-        caption='CONNECTING' if val is None and not error else 'UNAVAILABLE' if val is None else 'LAST KNOWN' if error or stale else 'REMAINING'
+        caption='CONNECTING' if val is None and not error else 'RATE LIMITED' if error and 'rate limited' in error.lower() else 'UNAVAILABLE' if val is None else 'LAST KNOWN' if error or stale else 'REMAINING'
         self.text(p,33,y+40,caption,6,MUTED)
         self.text(p,242,y+33,'--' if val is None else f'{round(self.display[name])}%',21,color,True)
         filled=0 if val is None else round(self.display[name]/100*16)

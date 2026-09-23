@@ -51,6 +51,11 @@ w.set_scroll(0)
 w.errors['Claude']='Connection failed'
 w.grab().save(str(widget.STATE/'stale.png'))
 w.errors.clear()
+w.received('Claude',None,'Claude rate limited; retrying')
+assert w.data['Claude'] and w.retry_after['Claude']>time.time()+290
+w.start_readers({'Claude':lambda:None})
+assert 'Claude' not in w.workers
+w.errors.clear()
 QApplication.sendEvent(w,QEvent(QEvent.Leave))
 QTest.qWait(800)
 assert not w.expanded and (w.width(),w.height())==(72,32)
