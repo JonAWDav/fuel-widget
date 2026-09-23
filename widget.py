@@ -64,6 +64,7 @@ class FuelWidget(QWidget):
         try:self.motion=json.loads((STATE/'preferences.json').read_text()).get('motion',True)
         except (OSError,ValueError):pass
         self.history=History(STATE/'usage-history.json')
+        self.restore_last_known()
         self.phase=0.; self.progress=0.; self.expanded=False; self.menu_open=False; self.opened=0
         self.anchor=QApplication.primaryScreen().availableGeometry().topRight()
         self.anchor.setX(self.anchor.x()-18); self.anchor.setY(self.anchor.y()+52)
@@ -148,12 +149,37 @@ class FuelWidget(QWidget):
             self.data[name]=data; self.updated[name]=time.time(); self.errors.pop(name,None); self.retry_after.pop(name,None)
             try: self.history.record(name,data.get('windows',[]),self.updated[name])
             except OSError: logger.warning('Could not persist forecast history')
+            try:
+                cache={n:{'data':value,'updated':self.updated[n]} for n,value in self.data.items() if n in self.updated}
+                temp=STATE/'feed-cache.tmp';temp.write_text(json.dumps(cache));temp.replace(STATE/'feed-cache.json')
+            except OSError: logger.warning('Could not persist last known feeds')
             logger.info('%s connected',name)
         else:
             self.errors[name]=error; logger.warning('%s: %s',name,error)
             if 'rate limited' in error.lower():
                 self.retry_after[name]=time.time()+300
         self.set_progress(self.progress);self.write_health(); self.update()
+
+    def restore_last_known(self):
+        try: cache=json.loads((STATE/'feed-cache.json').read_text())
+        except (OSError,ValueError):cache={}
+        if not isinstance(cache,dict):cache={}
+        now=time.time()
+        if not cache:
+            for key,series in self.history.series.items():
+                if ':' not in key or not series:continue
+                name,label=key.split(':',1);last=series[-1]
+                if not 0<=now-last['t']<3600:continue
+                feed=cache.setdefault(name,{'data':{'windows':[],'blocked':False},'updated':last['t']})
+                feed['data']['windows'].append({'label':label,'remaining':last['r'],'reset':last['reset']})
+                feed['updated']=max(feed['updated'],last['t'])
+        for name,entry in cache.items():
+            if not isinstance(entry,dict):continue
+            data=entry.get('data');updated=entry.get('updated')
+            if not isinstance(data,dict) or not isinstance(updated,(int,float)) or not 0<=now-updated<86400:continue
+            self.data[name]=data;self.updated[name]=updated
+            self.display[name]=effective(data) or 0
+            self.errors[name]='Waiting for fresh reading'
 
     def write_health(self):
         record={'pid':os.getpid(),'heartbeat':time.time(),'expanded':self.expanded,
