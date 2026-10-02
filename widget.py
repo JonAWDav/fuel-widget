@@ -21,21 +21,22 @@ STATE.mkdir(exist_ok=True)
 logger=logging.getLogger('fuel'); logger.setLevel(logging.INFO)
 handler=RotatingFileHandler(STATE/'widget.log',maxBytes=500000,backupCount=2)
 handler.setFormatter(logging.Formatter('%(asctime)s %(message)s')); logger.addHandler(handler)
+MIN_INTERVAL={'Claude':300}
 MINT='#39E7DA'; AMBER='#FFB547'; RED='#FF526D'; TEXT='#ECF1F7'; MUTED='#8591A7'
 
 def meter_color(value):
     return MUTED if value is None else RED if value<30 else AMBER if value<=60 else MINT
 
 class Worker(QThread):
-    result=Signal(str,object,str)
+    result=Signal(str,object,str,float)
     def __init__(self,name,fn):
         super().__init__(); self.name=name; self.fn=fn
     def run(self):
-        try: self.result.emit(self.name,self.fn(),'')
+        try: self.result.emit(self.name,self.fn(),'',0.)
         except Exception as e:
             # Do not log response bodies, headers or credentials.
             error=str(e) if isinstance(e,RuntimeError) else type(e).__name__+'; retrying'
-            self.result.emit(self.name,None,error)
+            self.result.emit(self.name,None,error,float(getattr(e,'seconds',None) or 0))
 
 def countdown(reset):
     if not reset: return 'Reset unavailable'
@@ -57,7 +58,7 @@ class FuelWidget(QWidget):
         if sys.platform == 'darwin':
             self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)
         self.setMouseTracking(True)
-        self.data={}; self.errors={}; self.updated={}; self.workers={}; self.retry_after={}; self.display={'Codex':0,'Claude':0}
+        self.data={}; self.errors={}; self.updated={}; self.workers={}; self.retry_after={}; self.rate_strikes={}; self.display={'Codex':0,'Claude':0}
         self.providers={'Codex':{'kind':'meter'},'Claude':{'kind':'meter'}}
         self.fonts={}; self.scroll=0.; self.last_frame=time.monotonic(); self.last_refresh=0.
         self.motion=True
@@ -77,11 +78,39 @@ class FuelWidget(QWidget):
         self.scroll_anim.valueChanged.connect(self.set_scroll)
         self.poll=QTimer(self); self.poll.timeout.connect(self.refresh); self.poll.start(90000)
         self.health=QTimer(self); self.health.timeout.connect(self.write_health); self.health.start(10000)
+        if sys.platform == 'win32' and QApplication.platformName() == 'windows':
+            self.topmost=QTimer(self); self.topmost.timeout.connect(self.keep_in_front); self.topmost.start(1000)
         self.set_progress(0)
         self.setToolTip('AI fuel: hover to expand. Right-click for controls.')
         self.make_tray()
         QApplication.primaryScreen().availableGeometryChanged.connect(self.reanchor)
-        self.show(); self.refresh(); self.write_health()
+        self.show(); self.keep_in_front(); self.refresh(); self.write_health()
+
+    def keep_in_front(self):
+        if sys.platform != 'win32' or QApplication.platformName() != 'windows' or not self.isVisible(): return
+        from ctypes import wintypes
+        user32=ctypes.windll.user32
+        user32.GetWindow.argtypes=[wintypes.HWND,wintypes.UINT]
+        user32.GetWindow.restype=wintypes.HWND
+        user32.GetWindowRect.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.RECT)]
+        user32.GetWindowThreadProcessId.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.DWORD)]
+        user32.SetWindowPos.argtypes=[wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT]
+        hwnd=int(self.winId())
+        rect=wintypes.RECT()
+        user32.GetWindowRect(wintypes.HWND(hwnd),ctypes.byref(rect))
+        above=user32.GetWindow(wintypes.HWND(hwnd),3)  # GW_HWNDPREV
+        while above:
+            other=wintypes.RECT()
+            pid=wintypes.DWORD()
+            user32.GetWindowThreadProcessId(wintypes.HWND(above),ctypes.byref(pid))
+            if (pid.value != os.getpid() and user32.IsWindowVisible(wintypes.HWND(above))
+                    and user32.GetWindowRect(wintypes.HWND(above),ctypes.byref(other))
+                    and rect.left < other.right and rect.right > other.left
+                    and rect.top < other.bottom and rect.bottom > other.top):
+                user32.SetWindowPos(wintypes.HWND(hwnd),wintypes.HWND(-1),0,0,0,0,
+                                    0x0001|0x0002|0x0010)  # NOSIZE, NOMOVE, NOACTIVATE
+                return
+            above=user32.GetWindow(wintypes.HWND(above),3)
 
     def reanchor(self,*args):
         self.anchor=QApplication.primaryScreen().availableGeometry().topRight()+QPointF(-18,52).toPoint()
@@ -100,6 +129,7 @@ class FuelWidget(QWidget):
         if yes:self.opened=time.monotonic()
         self.anim.setDuration(260 if self.motion else 1)
         self.anim.stop(); self.anim.setStartValue(self.progress); self.anim.setEndValue(1. if yes else 0.); self.anim.start()
+        if yes:self.keep_in_front()
 
     def enterEvent(self,event):
         self.close_timer.stop(); self.expand(True)
@@ -136,7 +166,7 @@ class FuelWidget(QWidget):
         worker=self.workers.pop(name,None)
         if worker: worker.deleteLater()
 
-    def received(self,name,data,error):
+    def received(self,name,data,error,wait=0.):
         if name=='@discovery':
             if data:
                 self.providers=data
@@ -146,7 +176,10 @@ class FuelWidget(QWidget):
                 self.start_readers({n:READERS[n] for n,d in data.items() if d['kind']=='meter' and n in READERS and n not in self.updated})
             return
         if data:
-            self.data[name]=data; self.updated[name]=time.time(); self.errors.pop(name,None); self.retry_after.pop(name,None)
+            self.data[name]=data; self.updated[name]=time.time(); self.errors.pop(name,None); self.rate_strikes.pop(name,None)
+            # Claude's usage endpoint throttles hard; polling it every 90s is what got it locked out.
+            if name in MIN_INTERVAL: self.retry_after[name]=time.time()+MIN_INTERVAL[name]
+            else: self.retry_after.pop(name,None)
             try: self.history.record(name,data.get('windows',[]),self.updated[name])
             except OSError: logger.warning('Could not persist forecast history')
             try:
@@ -157,7 +190,11 @@ class FuelWidget(QWidget):
         else:
             self.errors[name]=error; logger.warning('%s: %s',name,error)
             if 'rate limited' in error.lower():
-                self.retry_after[name]=time.time()+300
+                # Honour Retry-After and back off further on repeat 429s, so retries never reset the penalty.
+                strikes=self.rate_strikes.get(name,0); self.rate_strikes[name]=strikes+1
+                delay=min(3600,max(wait+30 if wait else 0,300*2**strikes))
+                self.retry_after[name]=time.time()+delay
+                logger.info('%s: next attempt in %d min',name,round(delay/60))
         self.set_progress(self.progress);self.write_health(); self.update()
 
     def restore_last_known(self):

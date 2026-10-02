@@ -2,7 +2,7 @@
 
 A small Windows and macOS overlay for AI allowances and prepaid balances. Collapses to a pill, expands on hover, and discovers supported apps on your computer.
 
-**No AI models are called by Fuel.** It makes read-only usage/balance requests and calculates forecasts locally with arithmetic. It sends no prompts, creates no inference sessions, and consumes no model tokens. Ordinary endpoint rate limits and small network traffic still apply.
+**Fuel almost never calls an AI model.** It makes read-only usage/balance requests and calculates forecasts locally with arithmetic. The one exception: if Claude's usage endpoint rate-limits Fuel, it reads the same allowance from the rate-limit headers on a 1-token Claude Haiku request, at most once every five minutes, until the endpoint unlocks. That uses a tiny slice of your Claude allowance. Ordinary endpoint rate limits and small network traffic still apply.
 
 ![Fuel widget](docs/screenshot.png)
 
@@ -52,7 +52,7 @@ Allowlisted provider keys are read from existing process/user environment variab
 
 Adapter references: [OpenRouter current-key API](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key), [Ollama running-model API](https://docs.ollama.com/api/ps), [LM Studio models API](https://lmstudio.ai/docs/developer/rest/list), [Hermes configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuration). Provider APIs can change. Kimi Code, OpenRouter and local model adapters have fixture coverage but were not authenticated against a live account during the original build; Codex, Claude and Moonshot balance were verified live.
 
-Each tank shows the lowest remaining allowance across its account's session and weekly windows. Separate window percentages and refill countdowns appear underneath. A blocked Codex account shows an empty tank. Unknown data shows `--`; connection failures keep the last known number and label it. No guessed refill is applied when a reset time passes. Usage is polled every 90 seconds, independently for each provider, without sending a model prompt or purchasing credits.
+Each tank shows the lowest remaining allowance across its account's session and weekly windows. Separate window percentages and refill countdowns appear underneath. A blocked Codex account shows an empty tank. Unknown data shows `--`; connection failures keep the last known number and label it. No guessed refill is applied when a reset time passes. Usage is polled every 90 seconds (Claude every five minutes), independently for each provider, without purchasing credits. Repeated rate limits back off up to an hour and honour the server's Retry-After.
 
 Codex uses the installed CLI's read-only app-server account/rateLimits/read method. Claude uses its usage endpoint with the existing Claude Code credential file or, on macOS when that file is absent, the default Claude Code Keychain item. macOS may request Keychain access for Fuel. Credentials are read in memory, never copied into this project or written to logs. Authentication is owned by the existing apps; sign into Claude Code or Codex again if needed. The Claude endpoint is not a guaranteed public API and may change.
 
